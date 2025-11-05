@@ -1,72 +1,76 @@
 pipeline {
     agent any
 
-    environment {
-        // 🧩 Replace with your details
-        PROJECT_ID = "crucial-quarter-477301-p6"
-        IMAGE_NAME = "demo-app"
-        SONARQUBE = "SonarQube"  // Jenkins SonarQube server name
-        REGISTRY = "gcr.io/${PROJECT_ID}/${IMAGE_NAME}"
+    tools {
+        jdk 'jdk17'            // ✅ Must match your Jenkins JDK tool name
+        maven 'maven3.8'       // ✅ Must match your Jenkins Maven tool name
     }
 
-    tools {
-        maven 'MAVEN_HOME'
-        jdk 'JDK11'
+    environment {
+        SCANNER_HOME = tool 'sonar-scanner'   // ✅ Must match Sonar Scanner tool name
     }
 
     stages {
-        stage('Checkout Code') {
+        stage('Git Checkout') {
             steps {
                 echo "📥 Cloning GitHub repository..."
                 git branch: 'main', url: 'https://github.com/harikrishnauppara11-create/Demo-project.git'
             }
         }
 
-        stage('Build with Maven') {
+        stage('Compile') {
             steps {
-                echo "🏗️ Building project using Maven..."
-                sh 'mvn clean package -DskipTests'
+                echo "⚙️ Compiling project..."
+                sh 'mvn compile'
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
-                echo "🔍 Running SonarQube Analysis..."
-                withSonarQubeEnv('SonarQube') {
-                    sh """
-                        mvn sonar:sonar \
-                          -Dsonar.projectKey=demo-project \
-                          -Dsonar.host.url=http://34.14.169.31:9000 \
-                          -Dsonar.login=<YOUR_SONAR_TOKEN>
-                    """
+                echo "🔍 Running SonarQube analysis..."
+                withSonarQubeEnv('sonar-server') {  // ✅ Must match your SonarQube server name
+                    sh '''
+                        $SCANNER_HOME/bin/sonar-scanner \
+                        -Dsonar.projectKey=poc-10 \
+                        -Dsonar.projectName=poc-10 \
+                        -Dsonar.java.binaries=target
+                    '''
                 }
             }
         }
 
-        stage('Build Docker Image') {
+        stage('Build') {
             steps {
-                echo "🐳 Building Docker image..."
-                sh 'docker build -t $REGISTRY:$BUILD_NUMBER .'
+                echo "🏗️ Building project..."
+                sh 'mvn clean install -DskipTests'
             }
         }
 
-        stage('Push Docker Image to GCR') {
+        stage('Docker Build and Push') {
             steps {
-                echo "☁️ Pushing Docker image to Google Container Registry..."
-                sh """
-                    gcloud auth configure-docker --quiet
-                    docker push $REGISTRY:$BUILD_NUMBER
-                """
+                script {
+                    echo "🐳 Building and pushing Docker image..."
+                    withDockerRegistry(credentialsId: 'docker-cred', toolName: 'docker') {
+                        sh '''
+                            docker build -t navya111yadagalla/poc-10:latest .
+                            docker push navya111yadagalla/poc-10:latest
+                        '''
+                    }
+                }
             }
         }
 
-        stage('Deploy to GKE') {
+        stage('Deploy to Docker Container') {
             steps {
-                echo "🚀 Deploying application to GKE..."
-                sh """
-                    gcloud container clusters get-credentials <YOUR_CLUSTER_NAME> --zone <YOUR_ZONE> --project $PROJECT_ID
-                    kubectl set image deployment/demo-app demo-app=$REGISTRY:$BUILD_NUMBER
-                """
+                script {
+                    echo "🚀 Deploying container locally..."
+                    // Stop and remove old container if it exists
+                    sh '''
+                        docker stop container || true
+                        docker rm container || true
+                        docker run -d --name container -p 8081:8081 navya111yadagalla/poc-10:latest
+                    '''
+                }
             }
         }
     }
@@ -76,7 +80,7 @@ pipeline {
             echo "✅ Pipeline completed successfully!"
         }
         failure {
-            echo "❌ Pipeline failed. Check logs for errors."
+            echo "❌ Pipeline failed. Check logs for details."
         }
     }
 }
