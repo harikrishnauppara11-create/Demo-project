@@ -1,34 +1,35 @@
 pipeline {
     agent any
 
-    environment {
-        PROJECT_ID = 'crucial-quarter-477301-p6'
-        IMAGE_NAME = 'demo-project'
-        IMAGE_TAG = "v${BUILD_NUMBER}"
-        SONAR_PROJECT_KEY = 'demo-project'
-        SONAR_HOST_URL = 'http://34.14.169.31:9000'
-        SONARQUBE_ENV = 'SonarQube servers'
-        SONAR_TOKEN = credentials('sonar-token')       // Use the credential you added in Jenkins
-        GCP_SA = credentials('gcp-service-account')    // GCP service account key (JSON)
+    tools {
+        // Must match Jenkins global tool configuration names
+        jdk 'JDK11'
+        maven 'Maven'
     }
 
-    tools {
-        maven 'Maven'
-        jdk 'JDK11'
+    environment {
+        PROJECT_ID = 'crucial-quarter-477301-p6'
+        IMAGE_NAME = 'demo-app'
+        IMAGE_TAG = 'latest'
+        GCR_REGION = 'asia-south1'
+        GKE_CLUSTER = 'gke-cluster'          // replace with your actual GKE cluster name
+        GKE_ZONE = 'asia-south1-a'           // replace with your GKE zone
+        SONARQUBE_ENV = 'SonarQube servers'  // must match your configured name
     }
 
     stages {
+
         stage('Checkout Code') {
             steps {
-                echo '📦 Checking out code from GitHub...'
+                echo '📥 Checking out source code...'
                 git branch: 'main', url: 'https://github.com/harikrishnauppara11-create/Demo-project.git'
             }
         }
 
         stage('Build with Maven') {
             steps {
-                echo '🔨 Building application with Maven...'
-                sh 'mvn clean package -DskipTests'
+                echo '⚙️ Building project with Maven...'
+                sh 'mvn -B clean package'
             }
         }
 
@@ -36,12 +37,7 @@ pipeline {
             steps {
                 echo '🔍 Running SonarQube Analysis...'
                 withSonarQubeEnv('SonarQube servers') {
-                    sh """
-                        mvn sonar:sonar \
-                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
-                        -Dsonar.host.url=${SONAR_HOST_URL} \
-                        -Dsonar.login=${SONAR_TOKEN}
-                    """
+                    sh 'mvn sonar:sonar'
                 }
             }
         }
@@ -57,34 +53,29 @@ pipeline {
 
         stage('Push Docker Image to GCR') {
             steps {
-                echo '🚀 Pushing Docker image to Google Container Registry...'
-                withCredentials([file(credentialsId: 'gcp-service-account', variable: 'GCP_KEY')]) {
-                    sh """
-                        gcloud auth activate-service-account --key-file=$GCP_KEY
-                        gcloud auth configure-docker gcr.io -q
-                        docker push gcr.io/${PROJECT_ID}/${IMAGE_NAME}:${IMAGE_TAG}
-                    """
-                }
+                echo '📤 Pushing Docker image to GCR...'
+                sh """
+                    gcloud auth configure-docker ${GCR_REGION}-docker.pkg.dev --quiet
+                    docker push gcr.io/${PROJECT_ID}/${IMAGE_NAME}:${IMAGE_TAG}
+                """
             }
         }
 
         stage('Deploy to GKE') {
             steps {
-                echo '☸️ Deploying to Google Kubernetes Engine...'
-                withCredentials([file(credentialsId: 'gcp-service-account', variable: 'GCP_KEY')]) {
-                    sh """
-                        gcloud auth activate-service-account --key-file=$GCP_KEY
-                        gcloud container clusters get-credentials my-gke-cluster --zone us-central1-a --project ${PROJECT_ID}
-                        kubectl set image deployment/${IMAGE_NAME}-deployment ${IMAGE_NAME}=gcr.io/${PROJECT_ID}/${IMAGE_NAME}:${IMAGE_TAG}
-                    """
-                }
+                echo '🚀 Deploying application to GKE...'
+                sh """
+                    gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${PROJECT_ID}
+                    kubectl apply -f k8s/deployment.yaml
+                    kubectl apply -f k8s/service.yaml
+                """
             }
         }
     }
 
     post {
         success {
-            echo '✅ Pipeline executed successfully!'
+            echo '✅ Deployment successful!'
         }
         failure {
             echo '❌ Pipeline failed. Check logs for errors.'
