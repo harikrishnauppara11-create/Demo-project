@@ -2,10 +2,10 @@ pipeline {
     agent any
 
     environment {
-        // 🔧 Replace with your real details
+        // 🧩 Replace with your real configuration
         PROJECT_ID = "crucial-quarter-477301-p6"
         IMAGE_NAME = "demo-app"
-        SONARQUBE = "SonarQube servers"  // Jenkins → Manage Jenkins → Configure System → SonarQube name
+        SONARQUBE_ENV = "SonarQube servers"   // Name from Jenkins > Manage Jenkins > Configure System
         REGISTRY = "gcr.io/${PROJECT_ID}/${IMAGE_NAME}"
         SONAR_TOKEN = "your_sonarqube_token_here"
         CLUSTER_NAME = "your_gke_cluster_name"
@@ -13,8 +13,8 @@ pipeline {
     }
 
     tools {
-        maven 'Maven'   // ✅ Name must exactly match the one in Jenkins Tool config
-        jdk 'JDK11'
+        maven 'Maven'   // ✅ Must match Jenkins Global Tool Configuration
+        jdk 'JDK11'     // ✅ Must match Jenkins JDK name
     }
 
     stages {
@@ -29,14 +29,14 @@ pipeline {
         stage('Build with Maven') {
             steps {
                 echo "🏗️ Building project using Maven..."
-                sh 'mvn clean package -DskipTests'
+                sh "mvn clean package -DskipTests"
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
                 echo "🔍 Running SonarQube Analysis..."
-                withSonarQubeEnv('SonarQube servers') {   // ✅ must match Jenkins SonarQube name
+                withSonarQubeEnv('SonarQube servers') {   // Must match your SonarQube server name
                     sh """
                         mvn sonar:sonar \
                           -Dsonar.projectKey=demo-project \
@@ -57,30 +57,3 @@ pipeline {
         stage('Push Docker Image to GCR') {
             steps {
                 echo "☁️ Pushing Docker image to Google Container Registry..."
-                sh """
-                    gcloud auth configure-docker --quiet
-                    docker push $REGISTRY:$BUILD_NUMBER
-                """
-            }
-        }
-
-        stage('Deploy to GKE') {
-            steps {
-                echo "🚀 Deploying application to GKE..."
-                sh """
-                    gcloud container clusters get-credentials $CLUSTER_NAME --zone $CLUSTER_ZONE --project $PROJECT_ID
-                    kubectl set image deployment/demo-app demo-app=$REGISTRY:$BUILD_NUMBER
-                """
-            }
-        }
-    }
-
-    post {
-        success {
-            echo "✅ Pipeline completed successfully!"
-        }
-        failure {
-            echo "❌ Pipeline failed. Check logs for errors."
-        }
-    }
-}
