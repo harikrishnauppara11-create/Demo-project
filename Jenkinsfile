@@ -1,73 +1,75 @@
 pipeline {
     agent any
 
-    tools {
-        // Must match Jenkins global tool configuration names
-        jdk 'JDK11'
-        maven 'Maven'
+    environment {
+        // 🔧 Replace with your real details
+        PROJECT_ID = "crucial-quarter-477301-p6"
+        IMAGE_NAME = "demo-app"
+        SONARQUBE = "SonarQube servers"  // Jenkins → Manage Jenkins → Configure System → SonarQube name
+        REGISTRY = "gcr.io/${PROJECT_ID}/${IMAGE_NAME}"
+        SONAR_TOKEN = "your_sonarqube_token_here"
+        CLUSTER_NAME = "your_gke_cluster_name"
+        CLUSTER_ZONE = "your_gke_zone"
     }
 
-    environment {
-        PROJECT_ID = 'crucial-quarter-477301-p6'
-        IMAGE_NAME = 'demo-app'
-        IMAGE_TAG = 'latest'
-        GCR_REGION = 'asia-south1'
-        GKE_CLUSTER = 'gke-cluster'          // replace with your actual GKE cluster name
-        GKE_ZONE = 'asia-south1-a'           // replace with your GKE zone
-        SONARQUBE_ENV = 'SonarQube servers'  // must match your configured name
+    tools {
+        maven 'Maven'   // ✅ Name must exactly match the one in Jenkins Tool config
+        jdk 'JDK11'
     }
 
     stages {
 
         stage('Checkout Code') {
             steps {
-                echo '📥 Checking out source code...'
+                echo "📥 Cloning GitHub repository..."
                 git branch: 'main', url: 'https://github.com/harikrishnauppara11-create/Demo-project.git'
             }
         }
 
         stage('Build with Maven') {
             steps {
-                echo '⚙️ Building project with Maven...'
-                sh 'mvn -B clean package'
+                echo "🏗️ Building project using Maven..."
+                sh 'mvn clean package -DskipTests'
             }
         }
 
         stage('SonarQube Analysis') {
             steps {
-                echo '🔍 Running SonarQube Analysis...'
-                withSonarQubeEnv('SonarQube servers') {
-                    sh 'mvn sonar:sonar'
+                echo "🔍 Running SonarQube Analysis..."
+                withSonarQubeEnv('SonarQube servers') {   // ✅ must match Jenkins SonarQube name
+                    sh """
+                        mvn sonar:sonar \
+                          -Dsonar.projectKey=demo-project \
+                          -Dsonar.host.url=http://34.14.169.31:9000 \
+                          -Dsonar.login=$SONAR_TOKEN
+                    """
                 }
             }
         }
 
         stage('Build Docker Image') {
             steps {
-                echo '🐳 Building Docker image...'
-                sh """
-                    docker build -t gcr.io/${PROJECT_ID}/${IMAGE_NAME}:${IMAGE_TAG} .
-                """
+                echo "🐳 Building Docker image..."
+                sh 'docker build -t $REGISTRY:$BUILD_NUMBER .'
             }
         }
 
         stage('Push Docker Image to GCR') {
             steps {
-                echo '📤 Pushing Docker image to GCR...'
+                echo "☁️ Pushing Docker image to Google Container Registry..."
                 sh """
-                    gcloud auth configure-docker ${GCR_REGION}-docker.pkg.dev --quiet
-                    docker push gcr.io/${PROJECT_ID}/${IMAGE_NAME}:${IMAGE_TAG}
+                    gcloud auth configure-docker --quiet
+                    docker push $REGISTRY:$BUILD_NUMBER
                 """
             }
         }
 
         stage('Deploy to GKE') {
             steps {
-                echo '🚀 Deploying application to GKE...'
+                echo "🚀 Deploying application to GKE..."
                 sh """
-                    gcloud container clusters get-credentials ${GKE_CLUSTER} --zone ${GKE_ZONE} --project ${PROJECT_ID}
-                    kubectl apply -f k8s/deployment.yaml
-                    kubectl apply -f k8s/service.yaml
+                    gcloud container clusters get-credentials $CLUSTER_NAME --zone $CLUSTER_ZONE --project $PROJECT_ID
+                    kubectl set image deployment/demo-app demo-app=$REGISTRY:$BUILD_NUMBER
                 """
             }
         }
@@ -75,10 +77,10 @@ pipeline {
 
     post {
         success {
-            echo '✅ Deployment successful!'
+            echo "✅ Pipeline completed successfully!"
         }
         failure {
-            echo '❌ Pipeline failed. Check logs for errors.'
+            echo "❌ Pipeline failed. Check logs for errors."
         }
     }
 }
